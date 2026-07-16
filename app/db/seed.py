@@ -1,153 +1,232 @@
-from sqlalchemy.orm import Session
-from ..models.user import User
-from ..models.role import Role, Permission
-from ..models.hospital import Hospital
-from ..models.subscription import SubscriptionPlan
-from ..core.security import get_password_hash
-from ..core.config import settings
+# app/db/seed.py
+
 import logging
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.security import get_password_hash
+from app.core.database import AsyncSessionLocal
+
+from app.models.user import User
+from app.models.role import Role, Permission
+from app.models.subscription import SubscriptionPlan
 
 logger = logging.getLogger(__name__)
 
 
-def seed_database(db: Session):
-    """Seed database with initial data."""
-    logger.info("Seeding database...")
-    
-    # Create super admin role
-    super_admin_role = db.query(Role).filter(Role.name == "super_admin").first()
+async def seed_database(db: AsyncSession):
+    logger.info("Starting database seeding...")
+
+    # ==========================================================
+    # Super Admin Role
+    # ==========================================================
+
+    result = await db.execute(
+        select(Role).where(Role.name == "super_admin")
+    )
+    super_admin_role = result.scalar_one_or_none()
+
     if not super_admin_role:
         super_admin_role = Role(
             name="super_admin",
             description="Super Administrator",
-            is_system_role=True
+            is_system_role=True,
         )
+
         db.add(super_admin_role)
-        db.commit()
-        db.refresh(super_admin_role)
-        logger.info("Created super_admin role")
-    
-    # Create permissions
+        await db.commit()
+        await db.refresh(super_admin_role)
+
+        logger.info("Super Admin role created.")
+
+    # ==========================================================
+    # Permissions
+    # ==========================================================
+
     permissions = [
-        # Hospital permissions
         {"name": "hospital.read", "resource": "hospital", "action": "read"},
         {"name": "hospital.create", "resource": "hospital", "action": "create"},
         {"name": "hospital.update", "resource": "hospital", "action": "update"},
         {"name": "hospital.delete", "resource": "hospital", "action": "delete"},
-        
-        # Subscription permissions
+
         {"name": "subscription.read", "resource": "subscription", "action": "read"},
         {"name": "subscription.create", "resource": "subscription", "action": "create"},
         {"name": "subscription.update", "resource": "subscription", "action": "update"},
         {"name": "subscription.delete", "resource": "subscription", "action": "delete"},
-        
-        # Audit permissions
-        {"name": "audit.read", "resource": "audit", "action": "read"},
-        
-        # User permissions
+
         {"name": "user.read", "resource": "user", "action": "read"},
         {"name": "user.create", "resource": "user", "action": "create"},
         {"name": "user.update", "resource": "user", "action": "update"},
         {"name": "user.delete", "resource": "user", "action": "delete"},
+
+        {"name": "audit.read", "resource": "audit", "action": "read"},
     ]
-    
-    for perm_data in permissions:
-        permission = db.query(Permission).filter(Permission.name == perm_data["name"]).first()
-        if not permission:
-            permission = Permission(
-                name=perm_data["name"],
-                resource=perm_data["resource"],
-                action=perm_data["action"],
-                is_system_permission=True
+
+    for perm in permissions:
+
+        result = await db.execute(
+            select(Permission).where(
+                Permission.name == perm["name"]
             )
-            db.add(permission)
-    
-    db.commit()
-    logger.info("Created permissions")
-    
-    # Assign all permissions to super_admin role
-    all_permissions = db.query(Permission).all()
+        )
+
+        permission = result.scalar_one_or_none()
+
+        if not permission:
+            db.add(
+                Permission(
+                    **perm,
+                    is_system_permission=True,
+                )
+            )
+
+    await db.commit()
+
+    logger.info("Permissions seeded.")
+
+    # ==========================================================
+    # Assign Permissions
+    # ==========================================================
+
+    result = await db.execute(
+        select(Permission)
+    )
+
+    all_permissions = result.scalars().all()
+
     super_admin_role.permissions = all_permissions
-    db.commit()
-    logger.info("Assigned permissions to super_admin role")
-    
-    # Create super admin user
-    super_admin = db.query(User).filter(User.email == settings.SUPER_ADMIN_EMAIL).first()
+
+    await db.commit()
+    await db.refresh(super_admin_role)
+
+    logger.info("Permissions assigned.")
+
+    # ==========================================================
+    # Super Admin User
+    # ==========================================================
+
+    result = await db.execute(
+        select(User).where(
+            User.email == settings.SUPER_ADMIN_EMAIL
+        )
+    )
+
+    super_admin = result.scalar_one_or_none()
+
     if not super_admin:
+
         super_admin = User(
             email=settings.SUPER_ADMIN_EMAIL,
             username="super_admin",
-            hashed_password=get_password_hash(settings.SUPER_ADMIN_PASSWORD),
+            hashed_password=get_password_hash(
+                settings.SUPER_ADMIN_PASSWORD
+            ),
             full_name="Super Administrator",
             user_type="platform_user",
             role_name="super_admin",
             is_verified=True,
-            is_active=True
+            is_active=True,
         )
+
         db.add(super_admin)
-        db.commit()
-        db.refresh(super_admin)
-        logger.info("Created super admin user")
-        
-        # Assign role
+
+        await db.commit()
+        await db.refresh(super_admin)
+
         super_admin.roles.append(super_admin_role)
-        db.commit()
-        logger.info("Assigned role to super admin")
-    
-    # Create default subscription plans
+
+        await db.commit()
+
+        logger.info("Super Admin user created.")
+
+    # ==========================================================
+    # Subscription Plans
+    # ==========================================================
+
     plans = [
         {
             "name": "Basic Plan",
             "code": "BASIC",
-            "description": "Basic plan for small hospitals",
-            "price": 499.00,
+            "description": "Basic plan",
+            "price": 499,
             "currency": "INR",
             "duration_days": "monthly",
             "max_users": 10,
             "max_storage_gb": 50,
-            "features": ["Basic EMR", "Patient Management", "Appointments"]
+            "features": [
+                "Basic EMR",
+                "Patient Management",
+                "Appointments",
+            ],
         },
         {
             "name": "Professional Plan",
             "code": "PROFESSIONAL",
-            "description": "Professional plan for medium hospitals",
-            "price": 999.00,
+            "description": "Professional plan",
+            "price": 999,
             "currency": "INR",
             "duration_days": "monthly",
             "max_users": 50,
             "max_storage_gb": 200,
-            "features": ["Advanced EMR", "Lab Integration", "Pharmacy", "Billing"]
+            "features": [
+                "Advanced EMR",
+                "Lab Integration",
+                "Pharmacy",
+                "Billing",
+            ],
         },
         {
             "name": "Enterprise Plan",
             "code": "ENTERPRISE",
-            "description": "Enterprise plan for large hospitals",
-            "price": 1999.00,
+            "description": "Enterprise plan",
+            "price": 1999,
             "currency": "INR",
             "duration_days": "monthly",
             "max_users": 200,
             "max_storage_gb": 1000,
-            "features": ["All Features", "AI Integration", "Advanced Analytics", "Custom Reports"]
-        }
+            "features": [
+                "All Features",
+                "AI Integration",
+                "Advanced Analytics",
+                "Custom Reports",
+            ],
+        },
     ]
-    
+
     for plan_data in plans:
-        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.code == plan_data["code"]).first()
-        if not plan:
-            plan = SubscriptionPlan(**plan_data)
-            db.add(plan)
-    
-    db.commit()
-    logger.info("Created subscription plans")
-    
-    logger.info("Database seeding completed!")
+
+        result = await db.execute(
+            select(SubscriptionPlan).where(
+                SubscriptionPlan.code == plan_data["code"]
+            )
+        )
+
+        existing = result.scalar_one_or_none()
+
+        if not existing:
+            db.add(
+                SubscriptionPlan(
+                    **plan_data
+                )
+            )
+
+    await db.commit()
+
+    logger.info("Subscription plans seeded.")
+
+    logger.info("Database seeding completed successfully.")
+
+
+async def run_seed():
+
+    async with AsyncSessionLocal() as db:
+        await seed_database(db)
 
 
 if __name__ == "__main__":
-    from ..core.database import SessionLocal
-    
-    db = SessionLocal()
-    try:
-        seed_database(db)
-    finally:
-        db.close()
+
+    import asyncio
+
+    asyncio.run(run_seed())

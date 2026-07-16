@@ -1,42 +1,49 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session, scoped_session
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.ext.asyncio import (
+    create_async_engine,
+    AsyncSession,
+    async_sessionmaker,
+)
+from sqlalchemy.pool import AsyncAdaptedQueuePool
+
 from ..core.config import settings
-import logging
 
-logger = logging.getLogger(__name__)
+# ==========================================================
+# Engine
+# ==========================================================
 
-# Create engine with connection pooling
-engine = create_engine(
+engine = create_async_engine(
     settings.DATABASE_URL,
-    poolclass=QueuePool,
+    echo=settings.DEBUG,
+    poolclass=AsyncAdaptedQueuePool,
     pool_size=settings.DATABASE_POOL_SIZE,
     max_overflow=settings.DATABASE_MAX_OVERFLOW,
     pool_pre_ping=True,
     pool_recycle=3600,
-    echo=settings.DEBUG
 )
 
-# Create session factory
-SessionLocal = sessionmaker(
-    autocommit=False,
+# ==========================================================
+# Session Factory
+# ==========================================================
+
+SessionLocal = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
     autoflush=False,
-    bind=engine
 )
 
-# Scoped session for thread safety
-scoped_session = scoped_session(SessionLocal)
+# ==========================================================
+# Dependency
+# ==========================================================
 
+async def get_db():
 
-def get_db() -> Session:
-    """Get database session dependency."""
-    db = scoped_session()
-    try:
-        yield db
-    finally:
-        db.close()
+    async with SessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
 
 
 def get_engine():
-    """Get database engine."""
     return engine
