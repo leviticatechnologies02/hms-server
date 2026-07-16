@@ -136,14 +136,21 @@ async def seed_database(db: AsyncSession):
             is_active=True,
         )
 
+        # db.add(super_admin)
+
+        # await db.commit()
+        # await db.refresh(super_admin)
+
+        # super_admin.roles.append(super_admin_role)
+
+        # await db.commit()
+        
+        super_admin.roles = [super_admin_role]
+
         db.add(super_admin)
 
         await db.commit()
         await db.refresh(super_admin)
-
-        super_admin.roles.append(super_admin_role)
-
-        await db.commit()
 
         logger.info("Super Admin user created.")
 
