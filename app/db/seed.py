@@ -1,6 +1,5 @@
-# app/db/seed.py
-
 import logging
+from sqlalchemy.orm import selectinload
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,9 +22,16 @@ async def seed_database(db: AsyncSession):
     # Super Admin Role
     # ==========================================================
 
+    # result = await db.execute(
+    #     select(Role).where(Role.name == "super_admin")
+    # )
+    # super_admin_role = result.scalar_one_or_none()
     result = await db.execute(
-        select(Role).where(Role.name == "super_admin")
+        select(Role)
+        .options(selectinload(Role.permissions))
+        .where(Role.name == "super_admin")
     )
+
     super_admin_role = result.scalar_one_or_none()
 
     if not super_admin_role:
