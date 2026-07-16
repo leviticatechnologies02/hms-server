@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update
 from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
@@ -37,17 +38,25 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 async def login(
     request: Request,
     credentials: LoginRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Authenticate user and generate JWT tokens.
     AUTH-001: Login API
     """
     # Find user by username or email
-    user = db.query(User).filter(
-        (User.username == credentials.username) |
-        (User.email == credentials.username)
-    ).first()
+    # user = db.query(User).filter(
+    #     (User.username == credentials.username) |
+    #     (User.email == credentials.username)
+    # ).first()
+    result = await db.execute(
+        select(User).where(
+            (User.username == credentials.username) |
+            (User.email == credentials.username)
+        )
+    )
+
+    user = result.scalar_one_or_none()
     
     if not user:
         # Create audit log for failed login
@@ -79,8 +88,9 @@ async def login(
         user.failed_login_attempts += 1
         if user.failed_login_attempts >= 5:
             user.locked_until = datetime.utcnow() + timedelta(minutes=30)
-        db.commit()
-        
+        #db.commit()
+        await db.commit()
+
         create_audit_log(
             db=db,
             user_id=user.id,
@@ -98,7 +108,8 @@ async def login(
     user.failed_login_attempts = 0
     user.locked_until = None
     user.last_login = datetime.utcnow()
-    db.commit()
+    # db.commit()
+    await db.commit()
     
     # Generate tokens
     token_data = {
@@ -119,8 +130,11 @@ async def login(
         ip_address=request.client.host if request.client else None,
         expires_at=datetime.utcnow() + timedelta(days=7)
     )
+    # db.add(session)
+    # db.commit()
     db.add(session)
-    db.commit()
+    await db.commit()
+    await db.refresh(session)
     
     # Create audit log for successful login
     create_audit_log(
@@ -152,7 +166,7 @@ async def login(
 async def refresh_token(
     request: Request,
     data: RefreshTokenRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Generate new access token using refresh token.
@@ -169,10 +183,18 @@ async def refresh_token(
             raise UnauthorizedException("Invalid token payload")
         
         # Check if session exists and is valid
-        session = db.query(UserSession).filter(
-            UserSession.refresh_token == data.refresh_token,
-            UserSession.is_valid == True
-        ).first()
+        # session = db.query(UserSession).filter(
+        #     UserSession.refresh_token == data.refresh_token,
+        #     UserSession.is_valid == True
+        # ).first()
+        result = await db.execute(
+            select(UserSession).where(
+                UserSession.refresh_token == data.refresh_token,
+                UserSession.is_valid == True
+            )
+        )
+
+        session = result.scalar_one_or_none()
         
         if not session:
             raise UnauthorizedException("Invalid or expired refresh token")
@@ -184,7 +206,15 @@ async def refresh_token(
             raise UnauthorizedException("Refresh token has expired")
         
         # Get user
-        user = db.query(User).filter(User.id == UUID(user_id)).first()
+        #user = db.query(User).filter(User.id == UUID(user_id)).first()
+        result = await db.execute(
+            select(User).where(
+                User.id == UUID(user_id)
+            )
+        )
+
+        user = result.scalar_one_or_none()
+
         if not user or not user.is_active:
             raise UnauthorizedException("User not found or inactive")
         
@@ -199,7 +229,8 @@ async def refresh_token(
         
         # Update session with new access token
         session.access_token = new_access_token
-        db.commit()
+        #db.commit()
+        await db.commit()
         
         return ResponseModel(
             success=True,
@@ -219,19 +250,25 @@ async def refresh_token(
 async def logout(
     request: Request,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Logout current user.
     AUTH-003: Logout API
     """
     # Invalidate all sessions for the user
-    db.query(UserSession).filter(
-        UserSession.user_id == current_user.id,
-        UserSession.is_valid == True
-    ).update({"is_valid": False})
-    
-    db.commit()
+    await db.execute(
+        update(UserSession)
+        .where(
+            UserSession.user_id == current_user.id,
+            UserSession.is_valid == True
+        )
+        .values(
+            is_valid=False
+        )
+    )
+
+    await db.commit()
     
     # Create audit log
     create_audit_log(
@@ -254,15 +291,22 @@ async def logout(
 async def forgot_password(
     request: Request,
     data: ForgotPasswordRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Initiate password reset process.
     AUTH-004: Forgot Password API
     """
     # Find user by email
-    user = db.query(User).filter(User.email == data.email).first()
-    
+    # user = db.query(User).filter(User.email == data.email).first()
+    result = await db.execute(
+        select(User).where(
+            User.email == data.email
+        )
+    )
+
+    user = result.scalar_one_or_none()
+
     if not user:
         # Don't reveal if user exists or not (security measure)
         return ResponseModel(
@@ -280,7 +324,7 @@ async def forgot_password(
         user.preferences = {}
     user.preferences['reset_otp'] = otp
     user.preferences['reset_otp_expiry'] = otp_expiry.isoformat()
-    db.commit()
+    await db.commit()
     
     # In production, send OTP via email/SMS
     logger.info(f"OTP for {user.email}: {otp}")
@@ -307,15 +351,22 @@ async def forgot_password(
 async def verify_otp(
     request: Request,
     data: VerifyOTPRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Verify OTP for password reset.
     AUTH-005: Verify OTP API
     """
     # Find user by email
-    user = db.query(User).filter(User.email == data.email).first()
-    
+    #user = db.query(User).filter(User.email == data.email).first()
+    result = await db.execute(
+        select(User).where(
+            User.email == data.email
+        )
+    )
+
+    user = result.scalar_one_or_none()
+
     if not user:
         raise NotFoundException("User", f"email {data.email}")
     
@@ -339,7 +390,7 @@ async def verify_otp(
     if not user.preferences:
         user.preferences = {}
     user.preferences['otp_verified'] = True
-    db.commit()
+    await db.commit()
     
     # Create audit log
     create_audit_log(
@@ -362,15 +413,22 @@ async def verify_otp(
 async def reset_password(
     request: Request,
     data: ResetPasswordRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Reset password after OTP verification.
     AUTH-006: Reset Password API
     """
     # Find user by email
-    user = db.query(User).filter(User.email == data.email).first()
-    
+    #user = db.query(User).filter(User.email == data.email).first()
+    result = await db.execute(
+        select(User).where(
+            User.email == data.email
+        )
+    )
+
+    user = result.scalar_one_or_none()
+
     if not user:
         raise NotFoundException("User", f"email {data.email}")
     
@@ -407,11 +465,17 @@ async def reset_password(
         user.preferences.pop('otp_verified', None)
     
     # Invalidate all sessions
-    db.query(UserSession).filter(
-        UserSession.user_id == user.id
-    ).update({"is_valid": False})
+    await db.execute(
+        update(UserSession)
+        .where(
+            UserSession.user_id == user.id
+        )
+        .values(
+            is_valid=False
+        )
+    )
     
-    db.commit()
+    await db.commit()
     
     # Create audit log
     create_audit_log(
@@ -435,7 +499,7 @@ async def change_password(
     request: Request,
     data: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Change password for authenticated user.
@@ -467,7 +531,7 @@ async def change_password(
     password_history.append(new_password_hash)
     current_user.password_history = password_history
     
-    db.commit()
+    await db.commit()
     
     # Create audit log
     create_audit_log(
@@ -489,17 +553,21 @@ async def change_password(
 @router.get("/session", response_model=ResponseModel)
 async def validate_session(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Validate current user session.
     AUTH-008: Validate Session API
     """
     # Check if user has any valid session
-    session = db.query(UserSession).filter(
-        UserSession.user_id == current_user.id,
-        UserSession.is_valid == True
-    ).first()
+    result = await db.execute(
+        select(UserSession).where(
+            UserSession.user_id == current_user.id,
+            UserSession.is_valid == True
+        )
+    )
+
+    session = result.scalar_one_or_none()
     
     if not session:
         raise UnauthorizedException("No active session found")
@@ -520,7 +588,7 @@ async def validate_session(
 @router.get("/me", response_model=ResponseModel)
 async def get_logged_user(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get current logged-in user profile.
@@ -547,17 +615,26 @@ async def get_logged_user(
 @router.get("/login-history", response_model=ResponseModel)
 async def get_login_history(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get login history for the current user.
     AUTH-010: Login History API
     """
     # Get audit logs for login actions
-    login_logs = db.query(AuditLog).filter(
-        AuditLog.user_id == current_user.id,
-        AuditLog.action.in_(["login_success", "login_failed"])
-    ).order_by(AuditLog.created_at.desc()).limit(50).all()
+    result = await db.execute(
+        select(AuditLog)
+        .where(
+            AuditLog.user_id == current_user.id,
+            AuditLog.action.in_(["login_success", "login_failed"])
+        )
+        .order_by(
+            AuditLog.created_at.desc()
+        )
+        .limit(50)
+    )
+
+    login_logs = result.scalars().all()
     
     history = []
     for log in login_logs:
