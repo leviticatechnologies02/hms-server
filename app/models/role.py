@@ -10,7 +10,7 @@ user_roles = Table(
     BaseModel.metadata,
     Column('user_id', UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True),
     Column('role_id', UUID(as_uuid=True), ForeignKey('roles.id', ondelete='CASCADE'), primary_key=True),
-    extend_existing=True
+    #extend_existing=True
 )
 
 role_permissions = Table(
@@ -18,7 +18,7 @@ role_permissions = Table(
     BaseModel.metadata,
     Column('role_id', UUID(as_uuid=True), ForeignKey('roles.id', ondelete='CASCADE'), primary_key=True),
     Column('permission_id', UUID(as_uuid=True), ForeignKey('permissions.id', ondelete='CASCADE'), primary_key=True),
-    extend_existing=True
+    #extend_existing=True
 )
 
 user_permissions = Table(
@@ -26,7 +26,7 @@ user_permissions = Table(
     BaseModel.metadata,
     Column('user_id', UUID(as_uuid=True), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True),
     Column('permission_id', UUID(as_uuid=True), ForeignKey('permissions.id', ondelete='CASCADE'), primary_key=True),
-    extend_existing=True
+    #extend_existing=True
 )
 
 

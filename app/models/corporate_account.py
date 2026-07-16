@@ -85,8 +85,20 @@ class CorporateAccount(BaseModel, AuditMixin):
         cascade="all, delete-orphan",
     )
 
+    hospitals = relationship(
+        "Hospital",
+        back_populates="corporate_account",
+    )
+
     reports = relationship(
         "CorporateReport",
+        back_populates="corporate_account",
+        cascade="all, delete-orphan",
+    )
+
+    settings = relationship(
+        "CorporateSetting",
+        uselist=False,
         back_populates="corporate_account",
         cascade="all, delete-orphan",
     )

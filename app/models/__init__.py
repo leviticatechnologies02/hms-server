@@ -9,6 +9,9 @@ from .branch_kpi import BranchKPI
 from .corporate_account import CorporateAccount
 from .corporate_report import CorporateReport
 from .hospital_group import HospitalGroup
+from .corporate_setting import CorporateSetting
+from .notification import Notification
+
 
 __all__ = [
     'BaseModel',
@@ -26,5 +29,8 @@ __all__ = [
     'BranchKPI',
     'CorporateAccount',
     'CorporateReport',
-    'HospitalGroup'
+    'HospitalGroup',
+    'CorporateSetting',
+    'Notification',
+    
 ]

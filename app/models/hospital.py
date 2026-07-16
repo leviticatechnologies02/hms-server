@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Text, JSON
+from sqlalchemy import Column, String, Boolean, DateTime, Text, JSON, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from .base import BaseModel, SoftDeleteMixin, AuditMixin
@@ -21,6 +21,21 @@ class Hospital(BaseModel, SoftDeleteMixin, AuditMixin):
     pin_code = Column(String(20), nullable=True)
     timezone = Column(String(50), default="UTC")
     currency = Column(String(3), default="INR")
+    # Corporate Account
+    corporate_account_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("corporate_accounts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    # Hospital Group
+    hospital_group_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("hospital_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     
     # Settings
     settings = Column(JSON, default={})
@@ -30,6 +45,15 @@ class Hospital(BaseModel, SoftDeleteMixin, AuditMixin):
     subscription = relationship("Subscription", back_populates="hospital", uselist=False)
     users = relationship("User", back_populates="hospital")
     #departments = relationship("Department", back_populates="hospital")
+    corporate_account = relationship(
+        "CorporateAccount",
+        back_populates="hospitals",
+    )
+
+    hospital_group = relationship(
+        "HospitalGroup",
+        back_populates="hospitals",
+    )
     
     def __repr__(self):
         return f"<Hospital {self.name}>"
