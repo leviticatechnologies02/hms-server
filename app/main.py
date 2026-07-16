@@ -144,16 +144,25 @@ async def root():
 
 
 # Database initialization
+# @app.on_event("startup")
+# async def startup():
+#     logger.info("Starting up Levitica OneHealth API")
+#     try:
+#         # Create tables
+#         Base.metadata.create_all(bind=engine)
+#         logger.info("Database tables created/verified")
+#     except Exception as e:
+#         logger.error(f"Database initialization error: {str(e)}")
 @app.on_event("startup")
 async def startup():
     logger.info("Starting up Levitica OneHealth API")
     try:
-        # Create tables
-        Base.metadata.create_all(bind=engine)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables created/verified")
     except Exception as e:
-        logger.error(f"Database initialization error: {str(e)}")
-
+        logger.error(f"Database initialization error: {e}")
+ 
 
 @app.on_event("shutdown")
 async def shutdown():
