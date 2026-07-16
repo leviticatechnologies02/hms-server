@@ -1,58 +1,113 @@
-from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional
 from uuid import UUID
-from ..models.hospital import Hospital
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.exceptions import DuplicateResourceException
+from ..models.hospital import Hospital
 from .base import BaseRepository
 
-
 class HospitalRepository(BaseRepository):
-    """Hospital repository."""
-    
-    def __init__(self, db: Session):
+    """Hospital Repository"""
+    def __init__(self, db: AsyncSession):
         super().__init__(db, Hospital)
-    
-    def get_by_code(self, code: str) -> Optional[Hospital]:
-        """Get hospital by code."""
-        return self.db.query(Hospital).filter(Hospital.code == code).first()
-    
-    def get_by_email(self, email: str) -> Optional[Hospital]:
-        """Get hospital by email."""
-        return self.db.query(Hospital).filter(Hospital.email == email).first()
-    
-    def get_with_subscription(self, hospital_id: UUID) -> Optional[Hospital]:
-        """Get hospital with subscription."""
-        return self.db.query(Hospital).filter(
-            Hospital.id == hospital_id,
-            Hospital.is_deleted == False
-        ).first()
-    
-    def create_hospital(self, data: dict) -> Hospital:
-        """Create hospital with validation."""
-        # Check for duplicate code
-        existing = self.get_by_code(data.get("code"))
+
+    # Get By Code
+    async def get_by_code(
+        self,
+        code: str,
+    ) -> Optional[Hospital]:
+
+        result = await self.db.execute(
+            select(Hospital).where(
+                Hospital.code == code
+            )
+        )
+
+        return result.scalar_one_or_none()
+
+    # Get By Email
+    async def get_by_email(
+        self,
+        email: str,
+    ) -> Optional[Hospital]:
+
+        result = await self.db.execute(
+            select(Hospital).where(
+                Hospital.email == email
+            )
+        )
+
+        return result.scalar_one_or_none()
+
+    # Get Hospital With Subscription
+    async def get_with_subscription(
+        self,
+        hospital_id: UUID,
+    ) -> Optional[Hospital]:
+
+        result = await self.db.execute(
+            select(Hospital).where(
+                Hospital.id == hospital_id,
+                Hospital.is_deleted == False,
+            )
+        )
+
+        return result.scalar_one_or_none()
+
+    # Create Hospital
+    async def create_hospital(
+        self,
+        data: dict,
+    ) -> Hospital:
+
+        existing = await self.get_by_code(
+            data["code"]
+        )
+
         if existing:
-            raise DuplicateResourceException("Hospital", "code", data.get("code"))
-        
-        # Check for duplicate email
-        existing = self.get_by_email(data.get("email"))
+            raise DuplicateResourceException(
+                "Hospital",
+                "code",
+                data["code"],
+            )
+        existing = await self.get_by_email(
+            data["email"]
+        )
         if existing:
-            raise DuplicateResourceException("Hospital", "email", data.get("email"))
-        
-        return self.create(**data)
-    
-    def search_hospitals(self, query: str) -> List[Hospital]:
-        """Search hospitals by name, code, or email."""
-        return self.db.query(Hospital).filter(
-            Hospital.is_deleted == False,
-            (Hospital.name.ilike(f"%{query}%") |
-             Hospital.code.ilike(f"%{query}%") |
-             Hospital.email.ilike(f"%{query}%"))
-        ).all()
-    
-    def get_active_hospitals(self) -> List[Hospital]:
-        """Get all active hospitals."""
-        return self.db.query(Hospital).filter(
-            Hospital.is_active == True,
-            Hospital.is_deleted == False
-        ).all()
+            raise DuplicateResourceException(
+                "Hospital",
+                "email",
+                data["email"],
+            )
+        return await self.create(**data)
+
+    # Search Hospitals
+    async def search_hospitals(
+        self,
+        query: str,
+    ):
+
+        result = await self.db.execute(
+            select(Hospital).where(
+                Hospital.is_deleted == False,
+                or_(
+                    Hospital.name.ilike(f"%{query}%"),
+                    Hospital.code.ilike(f"%{query}%"),
+                    Hospital.email.ilike(f"%{query}%"),
+                ),
+            )
+        )
+
+        return result.scalars().all()
+
+    # Active Hospitals
+    async def get_active_hospitals(
+        self,
+    ):
+        result = await self.db.execute(
+            select(Hospital).where(
+                Hospital.is_active == True,
+                Hospital.is_deleted == False,
+            )
+        )
+        return result.scalars().all()

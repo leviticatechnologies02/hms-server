@@ -1,14 +1,18 @@
-from sqlalchemy.orm import Session
-from uuid import UUID
-from typing import Optional, Any, Dict
-from ..models.audit import AuditLog
+# app/core/logging.py
+
 import logging
+from typing import Any, Dict, Optional
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models.audit import AuditLog
 
 logger = logging.getLogger(__name__)
 
 
-def create_audit_log(
-    db: Session,
+async def create_audit_log(
+    db: AsyncSession,
     user_id: Optional[UUID],
     action: str,
     resource_type: str,
@@ -19,10 +23,14 @@ def create_audit_log(
     user_agent: Optional[str] = None,
     status: str = "success",
     error_message: Optional[str] = None,
-    hospital_id: Optional[UUID] = None
-) -> AuditLog:
-    """Create an audit log entry."""
+    hospital_id: Optional[UUID] = None,
+) -> Optional[AuditLog]:
+    """
+    Create Audit Log
+    """
+
     try:
+
         audit_log = AuditLog(
             user_id=user_id,
             action=action,
@@ -34,14 +42,24 @@ def create_audit_log(
             user_agent=user_agent,
             status=status,
             error_message=error_message,
-            hospital_id=hospital_id
+            hospital_id=hospital_id,
         )
+
         db.add(audit_log)
-        db.commit()
-        db.refresh(audit_log)
+
+        await db.commit()
+
+        await db.refresh(audit_log)
+
         return audit_log
+
     except Exception as e:
-        logger.error(f"Failed to create audit log: {str(e)}")
-        db.rollback()
-        # Don't raise the exception to prevent disrupting the main flow
+
+        logger.exception(
+            "Failed to create audit log: %s",
+            str(e),
+        )
+
+        await db.rollback()
+
         return None
