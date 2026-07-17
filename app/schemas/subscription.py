@@ -5,17 +5,41 @@ from .common import AuditMixinSchema
 
 
 class SubscriptionPlanBase(BaseModel):
-    """Base subscription plan schema."""
-    name: str = Field(..., min_length=2, max_length=100, description="Plan name")
-    code: str = Field(..., min_length=2, max_length=50, description="Unique plan code")
-    description: Optional[str] = Field(None, max_length=500, description="Plan description")
-    price: float = Field(..., gt=0, description="Plan price")
-    currency: str = Field("INR", min_length=3, max_length=3, description="Currency")
-    duration_days: str = Field(..., description="Duration: monthly, quarterly, yearly")
-    max_users: int = Field(..., gt=0, description="Maximum users")
-    max_storage_gb: int = Field(..., gt=0, description="Maximum storage in GB")
-    features: List[str] = Field(default=[], description="Plan features")
-    meta_data: Optional[Dict[str, Any]] = Field(default={}, description="Additional metadata")
+    name: str = Field(..., min_length=2, max_length=100)
+    code: str = Field(..., min_length=2, max_length=50)
+    description: Optional[str] = Field(None, max_length=500)
+
+    price: float = Field(..., gt=0)
+
+    currency: str = Field(
+        default="INR",
+        min_length=3,
+        max_length=3
+    )
+
+    duration_days: int = Field(
+        ...,
+        gt=0,
+        description="Duration in days"
+    )
+
+    max_users: int = Field(
+        ...,
+        gt=0
+    )
+
+    max_storage_gb: int = Field(
+        ...,
+        gt=0
+    )
+
+    features: List[str] = Field(
+        default_factory=list
+    )
+
+    meta_data: Dict[str, Any] = Field(
+        default_factory=dict
+    )
 
 
 class SubscriptionPlanCreate(SubscriptionPlanBase):

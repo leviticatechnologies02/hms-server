@@ -7,6 +7,7 @@ from .core.config import settings
 from .core.database import engine, Base
 from .core.exceptions import LeviticaException
 from app.api.v1 import router as api_router
+from app.core.redis import connect_redis, disconnect_redis
 import logging
 import time
 
@@ -138,36 +139,48 @@ async def root():
     return {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
-        "docs": "/api/docs" if settings.DEBUG else None,
-        "health": "/health"
+        "docs": "/docs",
+        "redoc": "/redoc",
+        "openapi": "/openapi.json",
+        "health": "/health",
     }
 
-
-# Database initialization
-# @app.on_event("startup")
-# async def startup():
-#     logger.info("Starting up Levitica OneHealth API")
-#     try:
-#         # Create tables
-#         Base.metadata.create_all(bind=engine)
-#         logger.info("Database tables created/verified")
-#     except Exception as e:
-#         logger.error(f"Database initialization error: {str(e)}")
 @app.on_event("startup")
 async def startup():
     logger.info("Starting up Levitica OneHealth API")
+
     try:
+        # Database
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
         logger.info("Database tables created/verified")
+        # Redis
+        await connect_redis()
+
+        logger.info("Redis connected successfully")
+
     except Exception as e:
-        logger.error(f"Database initialization error: {e}")
- 
+        logger.exception(f"Startup Error: {e}")
+        raise
+
 
 @app.on_event("shutdown")
 async def shutdown():
+
     logger.info("Shutting down Levitica OneHealth API")
 
+    try:
+
+        await disconnect_redis()
+
+        await engine.dispose()
+
+        logger.info("Redis disconnected successfully")
+        logger.info("Database engine disposed successfully")
+
+    except Exception as e:
+        logger.exception(f"Shutdown Error: {e}")
 
 if __name__ == "__main__":
     import uvicorn

@@ -165,7 +165,7 @@ async def seed_database(db: AsyncSession):
             "description": "Basic plan",
             "price": 499,
             "currency": "INR",
-            "duration_days": "monthly",
+            "duration_days": "30",
             "max_users": 10,
             "max_storage_gb": 50,
             "features": [
@@ -180,7 +180,7 @@ async def seed_database(db: AsyncSession):
             "description": "Professional plan",
             "price": 999,
             "currency": "INR",
-            "duration_days": "monthly",
+            "duration_days": "30",
             "max_users": 50,
             "max_storage_gb": 200,
             "features": [
@@ -196,7 +196,7 @@ async def seed_database(db: AsyncSession):
             "description": "Enterprise plan",
             "price": 1999,
             "currency": "INR",
-            "duration_days": "monthly",
+            "duration_days": "30",
             "max_users": 200,
             "max_storage_gb": 1000,
             "features": [

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, String, DateTime, Numeric, ForeignKey, JSON
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Numeric, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from .base import BaseModel, AuditMixin
@@ -15,9 +15,9 @@ class SubscriptionPlan(BaseModel, AuditMixin):
     description = Column(String(500), nullable=True)
     price = Column(Numeric(10, 2), nullable=False)
     currency = Column(String(3), default="INR")
-    duration_days = Column(String(20), nullable=False)  # monthly, quarterly, yearly
-    max_users = Column(String(20), nullable=False)
-    max_storage_gb = Column(String(20), nullable=False)
+    duration_days = Column(Integer, nullable=False)  # monthly, quarterly, yearly
+    max_users = Column(Integer, nullable=False)
+    max_storage_gb = Column(Integer, nullable=False)
     features = Column(JSON, default=[])
     meta_data = Column(JSON, default={})
     

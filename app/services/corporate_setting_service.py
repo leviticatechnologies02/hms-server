@@ -1,5 +1,3 @@
-# app/services/corporate_setting_service.py
-
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -21,10 +19,7 @@ class CorporateSettingService:
         self.db = db
         self.repository = CorporateSettingRepository(db)
 
-    # ==========================================================
     # Create Settings
-    # ==========================================================
-
     async def create(
         self,
         payload: CorporateSettingCreate,
@@ -48,10 +43,7 @@ class CorporateSettingService:
             setting
         )
 
-    # ==========================================================
     # Get Settings
-    # ==========================================================
-
     async def get(
         self,
         corporate_account_id: UUID,

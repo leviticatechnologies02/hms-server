@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from typing import Optional, List
 from uuid import UUID
 from ....core.database import get_db
@@ -19,11 +21,18 @@ router = APIRouter(prefix="/roles", tags=["Super Admin - Roles & Permissions"])
 @router.get("/", response_model=ResponseModel)
 async def list_roles(
     current_user: User = Depends(get_current_super_admin),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """List all roles."""
-    roles = db.query(Role).filter(Role.is_active == True).all()
-    
+    #roles = db.query(Role).filter(Role.is_active == True).all()
+    result = await db.execute(
+        select(Role)
+        .options(selectinload(Role.permissions))
+        .where(Role.is_active == True)
+    )
+
+    roles = result.scalars().all()
+
     return ResponseModel(
         success=True,
         message="Roles retrieved successfully",
@@ -44,11 +53,17 @@ async def list_roles(
 async def create_role(
     data: dict,
     current_user: User = Depends(get_current_super_admin),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Create a new role."""
     # Check if role already exists
-    existing = db.query(Role).filter(Role.name == data.get("name")).first()
+    #existing = db.query(Role).filter(Role.name == data.get("name")).first()
+    result = await db.execute(
+        select(Role).where(Role.name == data.get("name"))
+    )
+
+    existing = result.scalar_one_or_none()
+
     if existing:
         raise DuplicateResourceException("Role", "name", data.get("name"))
     
@@ -58,16 +73,23 @@ async def create_role(
         is_system_role=False
     )
     db.add(role)
-    db.commit()
-    db.refresh(role)
+    await db.commit()
+    await db.refresh(role)
     
     # Assign permissions if provided
     if data.get("permission_ids"):
-        permissions = db.query(Permission).filter(
-            Permission.id.in_(data["permission_ids"])
-        ).all()
+        # permissions = db.query(Permission).filter(
+        #     Permission.id.in_(data["permission_ids"])
+        # ).all()
+        result = await db.execute(
+            select(Permission).where(
+                Permission.id.in_(data["permission_ids"])
+            )
+        )
+
+        permissions = result.scalars().all()
+        await db.commit()
         role.permissions = permissions
-        db.commit()
     
     # Create audit log
     create_audit_log(
@@ -93,11 +115,18 @@ async def create_role(
 @router.get("/permissions", response_model=ResponseModel)
 async def list_permissions(
     current_user: User = Depends(get_current_super_admin),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """List all permissions."""
-    permissions = db.query(Permission).filter(Permission.is_active == True).all()
-    
+    #permissions = db.query(Permission).filter(Permission.is_active == True).all()
+    result = await db.execute(
+        select(Permission).where(
+            Permission.is_active == True
+        )
+    )
+
+    permissions = result.scalars().all()
+
     # Group by resource
     grouped = {}
     for perm in permissions:
@@ -121,11 +150,19 @@ async def list_permissions(
 async def create_permission(
     data: dict,
     current_user: User = Depends(get_current_super_admin),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Create a new permission."""
     # Check if permission already exists
-    existing = db.query(Permission).filter(Permission.name == data.get("name")).first()
+    #existing = db.query(Permission).filter(Permission.name == data.get("name")).first()
+    result = await db.execute(
+        select(Permission).where(
+            Permission.name == data.get("name")
+        )
+    )
+
+    existing = result.scalar_one_or_none()
+    
     if existing:
         raise DuplicateResourceException("Permission", "name", data.get("name"))
     
@@ -137,8 +174,8 @@ async def create_permission(
         is_system_permission=False
     )
     db.add(permission)
-    db.commit()
-    db.refresh(permission)
+    await db.commit()
+    await db.refresh(permission)
     
     # Create audit log
     create_audit_log(
@@ -167,22 +204,34 @@ async def assign_permissions_to_role(
     role_id: UUID,
     data: dict,
     current_user: User = Depends(get_current_super_admin),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Assign permissions to a role."""
-    role = db.query(Role).filter(Role.id == role_id).first()
+    #role = db.query(Role).filter(Role.id == role_id).first()
+    result = await db.execute(
+        select(Role)
+        .options(selectinload(Role.permissions))
+        .where(Role.id == role_id)
+    )
+
+    role = result.scalar_one_or_none()
+    
     if not role:
         raise NotFoundException("Role", str(role_id))
     
     # Get permissions
     permission_ids = data.get("permission_ids", [])
-    permissions = db.query(Permission).filter(
-        Permission.id.in_(permission_ids)
-    ).all()
+    result = await db.execute(
+        select(Permission).where(
+            Permission.id.in_(permission_ids)
+        )
+    )
+
+    permissions = result.scalars().all()
     
     # Update role permissions
     role.permissions = permissions
-    db.commit()
+    await db.commit()
     
     # Create audit log
     create_audit_log(
@@ -211,10 +260,17 @@ async def assign_permissions_to_role(
 async def delete_role(
     role_id: UUID,
     current_user: User = Depends(get_current_super_admin),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Delete a role (soft delete)."""
-    role = db.query(Role).filter(Role.id == role_id).first()
+    #role = db.query(Role).filter(Role.id == role_id).first()
+    result = await db.execute(
+        select(Role).where(
+            Role.id == role_id
+        )
+    )
+
+    role = result.scalar_one_or_none()
     if not role:
         raise NotFoundException("Role", str(role_id))
     
@@ -222,7 +278,7 @@ async def delete_role(
         raise BusinessRuleException("Cannot delete system roles")
     
     role.is_active = False
-    db.commit()
+    await db.commit()
     
     # Create audit log
     create_audit_log(

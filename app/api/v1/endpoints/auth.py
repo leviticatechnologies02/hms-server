@@ -294,11 +294,9 @@ async def forgot_password(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Initiate password reset process.
-    AUTH-004: Forgot Password API
+    AUTH-004
+    Forgot Password
     """
-    # Find user by email
-    # user = db.query(User).filter(User.email == data.email).first()
     result = await db.execute(
         select(User).where(
             User.email == data.email
@@ -306,30 +304,30 @@ async def forgot_password(
     )
 
     user = result.scalar_one_or_none()
-
     if not user:
-        # Don't reveal if user exists or not (security measure)
         return ResponseModel(
             success=True,
-            message="If your email is registered, you will receive an OTP"
+            message="If your email is registered, you will receive an OTP."
         )
-    
+
+    from app.services.otp_service import OTPService
     # Generate OTP
-    otp = ''.join(secrets.choice(string.digits) for _ in range(6))
-    otp_expiry = datetime.utcnow() + timedelta(minutes=15)
-    
-    # Store OTP in user record or separate table
-    # For simplicity, we'll store in user preferences
-    if not user.preferences:
-        user.preferences = {}
-    user.preferences['reset_otp'] = otp
-    user.preferences['reset_otp_expiry'] = otp_expiry.isoformat()
-    await db.commit()
-    
-    # In production, send OTP via email/SMS
-    logger.info(f"OTP for {user.email}: {otp}")
-    
-    # Create audit log
+    otp = await OTPService.generate_otp()
+
+    # Save OTP In Redis
+    await OTPService.save_otp(
+        email=user.email,
+        otp=otp,
+    )
+
+    # Send Email / SMS
+    # await send_email_otp(user.email, otp)
+
+    logger.info(
+        f"OTP for {user.email}: {otp}"
+    )
+
+    # Audit Log
     create_audit_log(
         db=db,
         user_id=user.id,
@@ -337,15 +335,17 @@ async def forgot_password(
         resource_type="user",
         resource_id=user.id,
         ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("User-Agent")
-    )
-    
-    return ResponseModel(
-        success=True,
-        message="OTP sent to your registered email",
-        data={"email": user.email}
+        user_agent=request.headers.get("User-Agent"),
     )
 
+    return ResponseModel(
+        success=True,
+        message="OTP sent successfully.",
+        data={
+            "email": user.email,
+            "expires_in": OTPService.OTP_EXPIRY,
+        }
+    )
 
 @router.post("/verify-otp", response_model=ResponseModel)
 async def verify_otp(
@@ -354,11 +354,10 @@ async def verify_otp(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Verify OTP for password reset.
-    AUTH-005: Verify OTP API
+    AUTH-005
+    Verify Forgot Password OTP
     """
-    # Find user by email
-    #user = db.query(User).filter(User.email == data.email).first()
+
     result = await db.execute(
         select(User).where(
             User.email == data.email
@@ -368,31 +367,39 @@ async def verify_otp(
     user = result.scalar_one_or_none()
 
     if not user:
-        raise NotFoundException("User", f"email {data.email}")
-    
+        raise NotFoundException(
+            "User",
+            f"email {data.email}"
+        )
+
+    from app.services.otp_service import OTPService
+    # Get OTP From Redis
+    stored_otp = await OTPService.get_otp(
+        user.email
+    )
+
+    if stored_otp is None:
+        raise BusinessRuleException(
+            "OTP expired or not found. Please request a new OTP."
+        )
+
     # Verify OTP
-    stored_otp = user.preferences.get('reset_otp') if user.preferences else None
-    stored_expiry = user.preferences.get('reset_otp_expiry') if user.preferences else None
-    
-    if not stored_otp or not stored_expiry:
-        raise BusinessRuleException("No OTP found. Please request a new one")
-    
-    # Check if OTP matches
-    if stored_otp != data.otp:
-        raise BusinessRuleException("Invalid OTP")
-    
-    # Check if OTP is expired
-    expiry_time = datetime.fromisoformat(stored_expiry)
-    if datetime.utcnow() > expiry_time:
-        raise BusinessRuleException("OTP has expired. Please request a new one")
-    
-    # Mark OTP as verified
-    if not user.preferences:
-        user.preferences = {}
-    user.preferences['otp_verified'] = True
-    await db.commit()
-    
-    # Create audit log
+    if str(stored_otp).strip() != str(data.otp).strip():
+        raise BusinessRuleException(
+            "Invalid OTP"
+        )
+
+    # Mark OTP Verified
+    await OTPService.mark_verified(
+        user.email
+    )
+
+    # Delete OTP immediately after verification
+    await OTPService.delete_otp(
+        user.email
+    )
+
+    # Audit Log
     create_audit_log(
         db=db,
         user_id=user.id,
@@ -400,14 +407,13 @@ async def verify_otp(
         resource_type="user",
         resource_id=user.id,
         ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("User-Agent")
-    )
-    
-    return ResponseModel(
-        success=True,
-        message="OTP verified successfully"
+        user_agent=request.headers.get("User-Agent"),
     )
 
+    return ResponseModel(
+        success=True,
+        message="OTP verified successfully."
+    )
 
 @router.post("/reset-password", response_model=ResponseModel)
 async def reset_password(
@@ -416,11 +422,10 @@ async def reset_password(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Reset password after OTP verification.
-    AUTH-006: Reset Password API
+    AUTH-006
+    Reset Password
     """
-    # Find user by email
-    #user = db.query(User).filter(User.email == data.email).first()
+
     result = await db.execute(
         select(User).where(
             User.email == data.email
@@ -430,41 +435,63 @@ async def reset_password(
     user = result.scalar_one_or_none()
 
     if not user:
-        raise NotFoundException("User", f"email {data.email}")
-    
-    # Check if OTP is verified
-    if not user.preferences or not user.preferences.get('otp_verified'):
-        raise BusinessRuleException("OTP not verified. Please verify OTP first")
-    
-    # Validate password strength
-    is_valid, message = validate_password_strength(data.new_password)
+        raise NotFoundException(
+            "User",
+            f"email {data.email}"
+        )
+
+    from app.services.otp_service import OTPService
+
+    # Check OTP Verification
+    verified = await OTPService.is_verified(
+        user.email
+    )
+
+    if not verified:
+        raise BusinessRuleException(
+            "OTP not verified. Please verify OTP first."
+        )
+
+    # Password Validation
+    is_valid, message = validate_password_strength(
+        data.new_password
+    )
+
     if not is_valid:
         raise BusinessRuleException(message)
-    
-    # Check password history
+
+    # Password History
     password_history = user.password_history or []
-    for old_password_hash in password_history:
-        if verify_password(data.new_password, old_password_hash):
-            raise BusinessRuleException("Password already used recently")
-    
-    # Update password
-    new_password_hash = get_password_hash(data.new_password)
-    user.hashed_password = new_password_hash
+
+    for old_password in password_history:
+
+        if verify_password(
+            data.new_password,
+            old_password,
+        ):
+            raise BusinessRuleException(
+                "Password has been used recently."
+            )
+
+    # Update Password
+    hashed_password = get_password_hash(
+        data.new_password
+    )
+
+    user.hashed_password = hashed_password
     user.password_changed_at = datetime.utcnow()
-    
-    # Update password history
+
+    # Update Password History
+
     if len(password_history) >= 5:
         password_history.pop(0)
-    password_history.append(new_password_hash)
+
+    password_history.append(
+        hashed_password
+    )
     user.password_history = password_history
-    
-    # Clear reset data
-    if user.preferences:
-        user.preferences.pop('reset_otp', None)
-        user.preferences.pop('reset_otp_expiry', None)
-        user.preferences.pop('otp_verified', None)
-    
-    # Invalidate all sessions
+
+    # Invalidate All Sessions
     await db.execute(
         update(UserSession)
         .where(
@@ -474,10 +501,14 @@ async def reset_password(
             is_valid=False
         )
     )
-    
     await db.commit()
-    
-    # Create audit log
+
+    # Remove OTP From Redis
+    await OTPService.clear(
+        user.email
+    )
+
+    # Audit Log
     create_audit_log(
         db=db,
         user_id=user.id,
@@ -485,14 +516,13 @@ async def reset_password(
         resource_type="user",
         resource_id=user.id,
         ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("User-Agent")
-    )
-    
-    return ResponseModel(
-        success=True,
-        message="Password reset successfully"
+        user_agent=request.headers.get("User-Agent"),
     )
 
+    return ResponseModel(
+        success=True,
+        message="Password reset successfully."
+    )
 
 @router.post("/change-password", response_model=ResponseModel)
 async def change_password(
