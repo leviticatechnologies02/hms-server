@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.exceptions import DuplicateResourceException
 from ..models.hospital import Hospital
 from .base import BaseRepository
+from sqlalchemy.orm import selectinload
+from ..models.subscription import Subscription
 
 class HospitalRepository(BaseRepository):
     """Hospital Repository"""
@@ -46,13 +48,19 @@ class HospitalRepository(BaseRepository):
     ) -> Optional[Hospital]:
 
         result = await self.db.execute(
-            select(Hospital).where(
+            select(Hospital)
+            .options(
+                selectinload(Hospital.subscription)
+                .selectinload(Subscription.plan)
+            )
+            .where(
                 Hospital.id == hospital_id,
                 Hospital.is_deleted == False,
             )
         )
 
         return result.scalar_one_or_none()
+    
 
     # Create Hospital
     async def create_hospital(

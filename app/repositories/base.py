@@ -1,5 +1,6 @@
 from uuid import UUID
 from typing import Type, TypeVar, Optional, List
+from datetime import datetime
 
 from pydantic import BaseModel
 from sqlalchemy import select, func
@@ -133,10 +134,17 @@ class BaseRepository:
             await self.db.delete(record)
 
         else:
+            if hasattr(record, "is_active"):
+                record.is_active = False
+
             if hasattr(record, "is_deleted"):
                 record.is_deleted = True
 
+            if hasattr(record, "deleted_at"):
+                record.deleted_at = datetime.utcnow()
+
         await self.db.commit()
+        await self.db.refresh(record)
 
         return True
 

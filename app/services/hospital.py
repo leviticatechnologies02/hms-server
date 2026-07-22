@@ -247,6 +247,8 @@ class HospitalService:
         updated = await self.hospital_repo.update(
             hospital_id,
             is_active=True,
+            is_deleted=False,
+            deleted_at=None,
             updated_by=user_id,
         )
 
